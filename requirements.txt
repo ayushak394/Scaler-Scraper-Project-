@@ -1,0 +1,7 @@
+requests>=2.31
+tqdm
+python-dateutil
+beautifulsoup4
+lxml
+pytest
+python-dotenv
