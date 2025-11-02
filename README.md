@@ -47,7 +47,7 @@ Scaler/
 ##  ⚙️ Installation and Setup 
 ### 1. Clone the Repository
 ```bash
-git clone https://github.com/<your-username>/scaler-jira-pipeline.git
+git clone https://github.com/ayushak394/Scaler-Scraper-Project-.git
 cd Scaler-Scraper-Project
 ```
 ### 2. Create Virtual Environment
