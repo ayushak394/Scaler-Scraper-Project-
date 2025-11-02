@@ -1,168 +1,105 @@
-# import time
-# from urllib.parse import urljoin
-# import requests
-# from requests.adapters import HTTPAdapter
-# from urllib3.util.retry import Retry
-# from .config import JIRA_BASE, REQUEST_TIMEOUT
-# from .logger import get_logger
-
-# logger = get_logger(__name__)
-
-# class JiraClient:
-#     def __init__(self):
-#         self.session = requests.Session()
-#         retry_strategy = Retry(
-#             total=3,
-#             status_forcelist=[500, 502, 503, 504],
-#             allowed_methods=["GET", "POST"],
-#             backoff_factor=0.5,
-#             raise_on_status=False
-#         )
-#         adapter = HTTPAdapter(max_retries=retry_strategy)
-#         self.session.mount("https://", adapter)
-#         self.session.mount("http://", adapter)
-
-#     def _get(self, path, params=None):
-#         url = JIRA_BASE.rstrip("/") + "/" + path.lstrip("/")
-#         print("DEBUG: Fetching from", url)
-#         tries = 0
-#         while True:
-#             tries += 1
-#             try:
-#                 r = self.session.get(url, params=params, timeout=REQUEST_TIMEOUT)
-#             except requests.RequestException as e:
-#                 logger.warning("Request error %s on %s (try %d)", e, url, tries)
-#                 if tries >= 5:
-#                     raise
-#                 time.sleep(2 ** tries)
-#                 continue
-
-#             if r.status_code == 429:
-#                 retry_after = r.headers.get("Retry-After")
-#                 try:
-#                     wait = int(retry_after) if retry_after and retry_after.isdigit() else (2 ** tries)
-#                 except Exception:
-#                     wait = (2 ** tries)
-#                 logger.warning("429 Too Many Requests. Waiting %s seconds (try %d)", wait, tries)
-#                 time.sleep(wait)
-#                 if tries >= 8:
-#                     r.raise_for_status()
-#                 continue
-
-#             if 500 <= r.status_code < 600:
-#                 logger.warning("Server error %d on %s (try %d)", r.status_code, url, tries)
-#                 if tries >= 5:
-#                     r.raise_for_status()
-#                 time.sleep(2 ** tries)
-#                 continue
-
-#             if not r.ok:
-#                 # other non-200s (4xx)
-#                 logger.error("HTTP error %d: %s", r.status_code, r.text[:400])
-#                 r.raise_for_status()
-
-#             try:
-#                 return r.json()
-#             except ValueError:
-#                 logger.error("Failed to parse JSON from %s", url)
-#                 raise
-
-#     def search_issues(self, jql, start_at=0, max_results=50):
-#         path = "rest/api/2/search"
-#         params = {"jql": jql, "startAt": start_at, "maxResults": max_results}
-#         return self._get(path, params=params)
-
-#     def get_issue(self, issue_key, fields="*all"):
-#         path = f"rest/api/2/issue/{issue_key}"
-#         params = {"fields": fields}
-#         return self._get(path, params=params)
-
-import time
-from urllib.parse import urljoin
 import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
-from .config import JIRA_BASE, REQUEST_TIMEOUT
+import time
 from .logger import get_logger
+from .config import Config
 
 logger = get_logger(__name__)
 
-
 class JiraClient:
-    """Minimal JIRA REST API client with retries and backoff."""
+    """
+    Jira REST API client to fetch issues from Apache's public Jira instance.
+    Handles pagination, retries, and rate limits.
+    """
+
+    BASE_URL = "https://issues.apache.org/jira/rest/api/2"
 
     def __init__(self):
+        self.config = Config()
         self.session = requests.Session()
-        retry_strategy = Retry(
-            total=3,
-            status_forcelist=[500, 502, 503, 504],
-            allowed_methods=["GET", "POST"],
-            backoff_factor=0.5,
-            raise_on_status=False
-        )
-        adapter = HTTPAdapter(max_retries=retry_strategy)
-        self.session.mount("https://", adapter)
-        self.session.mount("http://", adapter)
+        self.session.headers.update({"Content-Type": "application/json"})
 
-    def _get(self, path, params=None):
-        """Generic GET request with retry and exponential backoff."""
-        url = urljoin(JIRA_BASE.rstrip("/") + "/", path.lstrip("/"))
-        tries = 0
+    
+    # Core Issue Fetching
 
-        while True:
-            tries += 1
+    def search_issues(self, jql, start_at=0, max_results=50, project_key=None):
+        """
+        Fetches a batch of Jira issues from the specified project.
+        Handles 429 and 5xx responses with retries.
+        """
+
+        url = f"{self.BASE_URL}/search" 
+
+        params = {
+            "jql": jql,
+            "startAt": start_at,
+            "maxResults": max_results,
+        }
+
+        attempt = 0
+        while attempt < 5:
             try:
-                r = self.session.get(url, params=params, timeout=REQUEST_TIMEOUT)
-            except requests.RequestException as e:
-                logger.warning("Request error %s on %s (try %d)", e, url, tries)
-                if tries >= 5:
-                    raise
-                time.sleep(min(2 ** tries, 60))
-                continue
+                response = self.session.get(url, params=params, timeout=15)
 
-            # Handle rate-limiting
-            if r.status_code == 429:
-                retry_after = r.headers.get("Retry-After")
-                try:
-                    wait = int(retry_after) if retry_after and retry_after.isdigit() else min(2 ** tries, 60)
-                except Exception:
-                    wait = min(2 ** tries, 60)
-                logger.warning("429 Too Many Requests. Waiting %s seconds (try %d)", wait, tries)
-                time.sleep(wait)
-                if tries >= 8:
-                    r.raise_for_status()
-                continue
+                if response.status_code == 429:
+                    wait_time = int(response.headers.get("Retry-After", 10))
+                    logger.warning(f"Rate limited (429). Retrying in {wait_time}s...")
+                    time.sleep(wait_time)
+                    attempt += 1
+                    continue
 
-            # Retry on transient server errors
-            if 500 <= r.status_code < 600:
-                logger.warning("Server error %d on %s (try %d)", r.status_code, url, tries)
-                if tries >= 5:
-                    r.raise_for_status()
-                time.sleep(min(2 ** tries, 60))
-                continue
+                if response.status_code >= 500:
+                    logger.warning(f"Server error {response.status_code}. Retry in 10s...")
+                    time.sleep(10)
+                    attempt += 1
+                    continue
 
-            # Handle other HTTP errors
-            if not r.ok:
-                logger.error("HTTP error %d: %s", r.status_code, r.text[:400])
-                r.raise_for_status()
+                response.raise_for_status()
+                data = response.json() 
+                return data.get("issues", [])
 
-            # Try parsing JSON
-            try:
-                return r.json()
-            except ValueError:
-                logger.error("Failed to parse JSON from %s (response snippet: %s)", url, r.text[:300])
-                if tries >= 3:
-                    raise
-                time.sleep(min(2 ** tries, 30))
+            except requests.exceptions.RequestException as e:
+                attempt += 1
+                logger.error(f"Request failed (attempt {attempt}/5): {e}")
+                time.sleep(5)
 
-    def search_issues(self, jql, start_at=0, max_results=50):
-        """Search issues in JIRA using JQL query."""
-        path = "rest/api/2/search"
-        params = {"jql": jql, "startAt": start_at, "maxResults": max_results}
-        return self._get(path, params=params)
+        logger.error(f"Failed to fetch issues for project {project_key} after 5 attempts.")
+        return []
+    
+    def get_issue(self, issue_key):
+        url = f"{self.BASE_URL}/issue/{issue_key}"
+        res = self.session.get(url)
+        if res.status_code == 200:
+            return res.json()
+        else:
+            logger.error(f"Failed to fetch issue {issue_key}: {res.status_code} - {res.text}")
+            return None
 
-    def get_issue(self, issue_key, fields="*all"):
-        """Fetch full issue details by key."""
-        path = f"rest/api/2/issue/{issue_key}"
-        params = {"fields": fields}
-        return self._get(path, params=params)
+
+    # Single Issue Fetching (for checkpoint-based resume)
+
+    def fetch_issue_by_index(self, project_key, index):
+        """
+        Fetch a single issue at the given index (used for checkpoint resume).
+        Returns None if not found or request fails.
+        """
+        issues = self.fetch_issues(project_key, start_at=index, limit=1)
+        if not issues:
+            logger.warning(f"[{project_key}] No issue found at index {index}")
+            return None
+        return issues[0]
+
+    # Utility
+
+    def fetch_total_issues(self, project_key):
+        """
+        Returns total number of issues for a given project.
+        """
+        url = f"{self.BASE_URL}/search"
+        params = {"jql": f"project={project_key}", "maxResults": 1}
+        try:
+            response = self.session.get(url, params=params, timeout=10)
+            response.raise_for_status()
+            return response.json().get("total", 0)
+        except Exception as e:
+            logger.error(f"Failed to fetch total issue count for {project_key}: {e}")
+            return 0

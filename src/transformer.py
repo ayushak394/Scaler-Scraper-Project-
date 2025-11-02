@@ -1,76 +1,3 @@
-# import json
-# from pathlib import Path
-# from tqdm import tqdm
-# from .config import RAW_DIR
-
-# OUTPUT_DIR = Path("outputs/processed")
-# OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
-
-# def transform_issue(issue_data):
-#     """
-#     Convert a raw Jira issue JSON into a structured record.
-#     Handles missing or null fields gracefully.
-#     """
-#     # Safely get the 'fields' dictionary
-#     fields = issue_data.get("fields") or {}
-
-#     # Safely extract nested values
-#     project_data = fields.get("project") or {}
-#     status_data = fields.get("status") or {}
-#     priority_data = fields.get("priority") or {}
-#     assignee_data = fields.get("assignee") or {}
-#     reporter_data = fields.get("reporter") or {}
-#     issue_type_data = fields.get("issuetype") or {}
-#     comment_data = (fields.get("comment") or {}).get("comments", []) or []
-
-#     return {
-#         "id": issue_data.get("id"),
-#         "key": issue_data.get("key"),
-#         "project": project_data.get("key"),
-#         "title": fields.get("summary") or "",
-#         "description": fields.get("description") or "",
-#         "status": status_data.get("name"),
-#         "priority": priority_data.get("name"),
-#         "assignee": assignee_data.get("displayName"),
-#         "reporter": reporter_data.get("displayName"),
-#         "labels": fields.get("labels") or [],
-#         "created": fields.get("created"),
-#         "updated": fields.get("updated"),
-#         "comments": [c.get("body", "") for c in comment_data],
-#         # Derived LLM task examples
-#         "tasks": {
-#             "summarization": f"Summarize the issue titled '{fields.get('summary') or 'Untitled'}'",
-#             "classification": f"Classify the type of issue: {issue_type_data.get('name') or 'Unknown'}",
-#             "qna": f"Question: What is the issue about?\nAnswer: {fields.get('description') or 'No description provided.'}"
-#         }
-#     }
-
-
-#     """
-#     Loop through raw data for each project and write a JSONL file.
-#     """
-#     for project in projects:
-#         project_dir = RAW_DIR / project
-#         if not project_dir.exists():
-#             print(f"⚠️ No raw data found for project {project}, skipping.")
-#             continue
-
-#         output_file = OUTPUT_DIR / f"{project}.jsonl"
-
-#         with open(output_file, "w", encoding="utf-8") as out_f:
-#             files = list(project_dir.glob("*.json"))
-#             print(f"🔄 Transforming {len(files)} issues from {project}...")
-#             for file_path in tqdm(files):
-#                 try:
-#                     data = json.loads(file_path.read_text(encoding="utf-8"))
-#                     transformed = transform_issue(data)
-#                     out_f.write(json.dumps(transformed, ensure_ascii=False) + "\n")
-#                 except Exception as e:
-#                     print(f"❌ Failed to transform {file_path.name}: {e}")
-
-#         print(f"✅ Saved transformed data for {project} → {output_file}")
-
 import json
 from pathlib import Path
 from tqdm import tqdm
@@ -109,7 +36,6 @@ def transform_issue(issue_data):
         "created": fields.get("created"),
         "updated": fields.get("updated"),
         "comments": [c.get("body", "") for c in comment_data],
-        # Derived tasks for LLM use cases
         "tasks": {
             "summarization": f"Summarize the issue titled '{fields.get('summary') or 'Untitled'}'",
             "classification": f"Classify the type of issue: {issue_type_data.get('name') or 'Unknown'}",

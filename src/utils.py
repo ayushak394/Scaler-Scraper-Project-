@@ -1,24 +1,32 @@
-import re
-from bs4 import BeautifulSoup
 from pathlib import Path
 import json
+from typing import Any, Dict
 
-def html_to_text(html):
-    if not html:
-        return ""
-    # Jira sometimes stores as plain text or HTML-ish markup
-    if not isinstance(html, str):
-        return str(html)
-    soup = BeautifulSoup(html, "lxml")
-    # preserve pre/code blocks
-    for pre in soup.find_all("pre"):
-        pre.string = "\n" + pre.get_text() + "\n"
-    text = soup.get_text("\n")
-    # collapse multiple blank lines
-    text = re.sub(r'\n\s*\n+', '\n\n', text)
-    return text.strip()
-
-def atomic_write(path: Path, data: str):
+def atomic_write(path: Path, data: str) -> None:
+    """
+    Write `data` to a temporary file then atomically replace `path`.
+    """
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(data, encoding="utf-8")
     tmp.replace(path)
+
+def load_state(path: Path) -> Dict[str, Any]:
+    """
+    Load JSON state from path. Return empty dict if file missing or malformed.
+    """
+    if not path.exists():
+        return {}
+    try:
+        raw = path.read_text(encoding="utf-8")
+        data = json.loads(raw)
+        if not isinstance(data, dict):
+            return {}
+        return data
+    except Exception:
+        return {}
+
+def save_state(path: Path, state: Dict[str, Any]) -> None:
+    """
+    Atomically write state (dict) into path.
+    """
+    atomic_write(path, json.dumps(state, indent=2, ensure_ascii=False))
